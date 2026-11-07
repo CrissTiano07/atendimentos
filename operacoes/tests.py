@@ -64,3 +64,49 @@ class ParticipacaoTests(TestCase):
     def test_atalho_reverso_participacoes(self):
         self.assertEqual(self.joao.participacoes.count(), 2)
         self.assertEqual(self.joao.demandas.count(), 2)
+
+
+class AdminTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+        cls.admin_user = get_user_model().objects.create_superuser("admin", "a@a.com", "senha-de-teste")
+        cls.joao = Colaborador.objects.create(nome="João")
+        cls.maria = Colaborador.objects.create(nome="Maria")
+
+    def setUp(self):
+        self.client.force_login(self.admin_user)
+
+    def test_listagens_abrem(self):
+        for nome in ("colaborador", "demanda"):
+            resp = self.client.get(f"/admin/operacoes/{nome}/")
+            self.assertEqual(resp.status_code, 200, nome)
+
+    def test_criar_demanda_com_participantes_pelo_inline(self):
+        resp = self.client.post("/admin/operacoes/demanda/add/", {
+            "tipo": "Fiscalização de trânsito",
+            "data": "2026-11-06",
+            "participacoes-TOTAL_FORMS": "2",
+            "participacoes-INITIAL_FORMS": "0",
+            "participacoes-MIN_NUM_FORMS": "0",
+            "participacoes-MAX_NUM_FORMS": "1000",
+            "participacoes-0-colaborador": str(self.joao.id),
+            "participacoes-1-colaborador": str(self.maria.id),
+        })
+        self.assertEqual(resp.status_code, 302)
+        demanda = Demanda.objects.get(tipo="Fiscalização de trânsito")
+        self.assertEqual(demanda.participacoes.count(), 2)
+
+    def test_inline_rejeita_mesma_pessoa_duas_vezes(self):
+        resp = self.client.post("/admin/operacoes/demanda/add/", {
+            "tipo": "Apoio operacional",
+            "data": "2026-11-06",
+            "participacoes-TOTAL_FORMS": "2",
+            "participacoes-INITIAL_FORMS": "0",
+            "participacoes-MIN_NUM_FORMS": "0",
+            "participacoes-MAX_NUM_FORMS": "1000",
+            "participacoes-0-colaborador": str(self.joao.id),
+            "participacoes-1-colaborador": str(self.joao.id),
+        })
+        self.assertEqual(resp.status_code, 200)  # volta ao formulário com erro
+        self.assertFalse(Demanda.objects.filter(tipo="Apoio operacional").exists())
